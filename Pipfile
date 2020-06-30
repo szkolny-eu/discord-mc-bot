@@ -1,0 +1,16 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+discord = "*"
+python-dotenv = "*"
+mcstatus = "*"
+mysql-connector-python = "*"
+aio-timers = "*"
+
+[requires]
+python_version = "3.8"
