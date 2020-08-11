@@ -10,6 +10,10 @@ from options import *
 
 bot = commands.Bot(command_prefix="/")
 server = MinecraftServer(host=SERVER_IP)
+if SEC1_IP:
+    server_sec1 = MinecraftServer.lookup(SEC1_IP)
+if SEC2_IP:
+    server_sec2 = MinecraftServer.lookup(SEC2_IP)
 
 
 async def timer_task():
@@ -21,10 +25,30 @@ async def timer_task():
     timer = Timer(5, timer_task)
 
 
+async def timer_task_sec():
+    try:
+        await ping_secondary()
+    except:
+        pass
+    global timer_sec
+    timer_sec = Timer(5, timer_task_sec)
+
+
 timer = None
+timer_sec = None
 message = None
 first_seen = None
 last_seen = None
+sec1_online = None
+sec2_online = None
+sec1_motd = None
+sec2_motd = None
+sec1_players = 0
+sec2_players = 0
+sec1_max = 0
+sec2_max = 0
+sec1_version = ''
+sec2_version = ''
 
 
 def log(text):
@@ -37,16 +61,65 @@ async def on_ready():
     global message
     message = await channel.fetch_message(STATUS_MESSAGE_ID)
 
+    global timer, timer_sec
+    global sec1_online, sec1_motd
+    global sec2_online, sec2_motd
+    if SEC1_IP:
+        sec1_motd = SEC_PINGING_TEXT
+    if SEC2_IP:
+        sec2_motd = SEC_PINGING_TEXT
+
     try:
         await update_status()
     except:
         pass
-    global timer
     timer = Timer(10, timer_task)
+    timer_sec = Timer(5, timer_task_sec)
+
+
+async def ping_secondary():
+    log("Pinging server SEC1...")
+    global server_sec1, sec1_online, sec1_motd, sec1_players, sec1_max, sec1_version
+    try:
+        status = server_sec1.status()
+        if status.version.protocol > 1:
+            if sec1_online is None:
+                sec1_online = datetime.now()
+            sec1_motd = status.description['text']
+            sec1_players = status.players.online
+            sec1_max = status.players.max
+            sec1_version = status.version.name
+        else:
+            sec1_online = None
+            sec1_motd = SEC_OFFLINE_TEXT
+    except Exception as e:
+        sec1_online = None
+        sec1_motd = f"{SEC_DISCONNECTED_TEXT}\n{str(e)}"
+    
+
+    log("Pinging server SEC2...")
+    global server_sec2, sec2_online, sec2_motd, sec2_players, sec2_max, sec2_version
+    try:
+        status = server_sec2.status()
+        if status.version.protocol > 1:
+            if sec2_online is None:
+                sec2_online = datetime.now()
+            sec2_motd = status.description['text']
+            sec2_players = status.players.online
+            sec2_max = status.players.max
+            sec2_version = status.version.name
+        else:
+            sec2_online = None
+            sec2_motd = SEC_OFFLINE_TEXT
+    except Exception as e:
+        sec2_online = None
+        sec2_motd = f"{SEC_DISCONNECTED_TEXT}\n{str(e)}"
 
 
 async def update_status(get_embed=False):
     global first_seen, last_seen
+    global server_sec1, sec1_online, sec1_motd, sec1_players, sec1_max, sec1_version
+    global server_sec2, sec2_online, sec2_motd, sec2_players, sec2_max, sec2_version
 
     embed = Embed(
         #title="Szkolny.eu Minecraft",
@@ -134,9 +207,43 @@ async def update_status(get_embed=False):
             value=str(e)
         )
 
+    if SEC1_IP:
+        if sec1_online:
+            uptime = datetime.now() - sec1_online
+            uptime = str(uptime).split('.')[0]
+
+            embed.add_field(
+                name=SEC1_NAME,
+                value=f':white_check_mark: {sec1_motd}\n`{sec1_players}/{sec1_max} graczy, {sec1_version}, {uptime}`\n{SEC1_DESCRIPTION}',
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name=SEC1_NAME,
+                value=f':x: {sec1_motd}',
+                inline=False
+            )
+
+    if SEC2_IP:
+        if sec2_online:
+            uptime = datetime.now() - sec2_online
+            uptime = str(uptime).split('.')[0]
+
+            embed.add_field(
+                name=SEC2_NAME,
+                value=f':white_check_mark: {sec2_motd}\n`{sec2_players}/{sec2_max} graczy, {sec2_version}, {uptime}`\n{SEC2_DESCRIPTION}',
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name=SEC2_NAME,
+                value=f':x: {sec2_motd}',
+                inline=False
+            )
+
     global message
     if message and not get_embed:
-        await message.edit(embed=embed)
+        await message.edit(embed=embed, content="")
     elif get_embed:
         return embed
 
