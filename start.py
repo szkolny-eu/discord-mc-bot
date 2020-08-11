@@ -31,7 +31,7 @@ async def timer_task_sec():
     except:
         pass
     global timer_sec
-    timer_sec = Timer(5, timer_task_sec)
+    timer_sec = Timer(20, timer_task_sec)
 
 
 timer = None
@@ -74,7 +74,7 @@ async def on_ready():
     except:
         pass
     timer = Timer(10, timer_task)
-    timer_sec = Timer(5, timer_task_sec)
+    timer_sec = Timer(20, timer_task_sec)
 
 
 async def ping_secondary():
