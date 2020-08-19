@@ -1,5 +1,7 @@
 from datetime import datetime
 
+# noinspection PyUnresolvedReferences
+import aiohttp
 import mysql.connector
 from aio_timers import Timer
 from discord import Embed, Colour, Game
