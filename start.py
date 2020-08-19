@@ -1,15 +1,16 @@
+from datetime import datetime
+
+import mysql.connector
+from aio_timers import Timer
 from discord import Embed, Colour, Game
 from discord.ext import commands
 from discord.ext.commands.context import Context
 from mcstatus import MinecraftServer
-from aio_timers import Timer
-import mysql.connector
-from datetime import datetime
 
 from options import *
 
 bot = commands.Bot(command_prefix="/")
-server = MinecraftServer(host=SERVER_IP)
+server = MinecraftServer.lookup(SERVER_IP)
 if SEC1_IP:
     server_sec1 = MinecraftServer.lookup(SEC1_IP)
 if SEC2_IP:
@@ -22,7 +23,7 @@ async def timer_task():
     except:
         pass
     global timer
-    timer = Timer(5, timer_task)
+    timer = Timer(10, timer_task)
 
 
 async def timer_task_sec():
@@ -71,6 +72,7 @@ async def on_ready():
 
     try:
         await update_status()
+        await ping_secondary()
     except:
         pass
     timer = Timer(10, timer_task)
@@ -89,12 +91,15 @@ async def ping_secondary():
             sec1_players = status.players.online
             sec1_max = status.players.max
             sec1_version = status.version.name
+            log("SEC1 online")
         else:
             sec1_online = None
             sec1_motd = SEC_OFFLINE_TEXT
+            log("SEC1 offline")
     except Exception as e:
         sec1_online = None
         sec1_motd = f"{SEC_DISCONNECTED_TEXT}\n{str(e)}"
+        log("!!! SEC1 disconnected")
     
 
     log("Pinging server SEC2...")
@@ -108,12 +113,139 @@ async def ping_secondary():
             sec2_players = status.players.online
             sec2_max = status.players.max
             sec2_version = status.version.name
+            log("SEC2 online")
         else:
             sec2_online = None
             sec2_motd = SEC_OFFLINE_TEXT
+            log("SEC2 offline")
     except Exception as e:
         sec2_online = None
         sec2_motd = f"{SEC_DISCONNECTED_TEXT}\n{str(e)}"
+        log("!!! SEC2 disconnected")
+
+
+async def server_status(embed):
+    global first_seen, last_seen
+
+    if first_seen is not None:  # previously online, try Query directly
+        try:
+            await server_query(embed)
+        except Exception as e:
+            pass
+        # continue with Status on failure
+
+    log("Pinging server...")
+    status = server_sec2.status()
+
+    if status.version.protocol > 1:
+        log("Server online")
+        if first_seen is None:  # previously offline, try Query now
+            await server_query(embed)
+        return
+
+    log("Server offline")
+    await bot.change_presence(activity=Game(
+        name=f"Minecraft - serwer offline"
+    ))
+
+    first_seen = None
+
+    embed.colour = Colour.from_rgb(0x4c, 0xaf, 0x50)
+    embed.add_field(
+        name='Serwer jest wyłączony',
+        value=
+        'Dołącz do serwera, aby go uruchomić.',
+        inline=False
+    )
+    embed.add_field(
+        name='Ostatnio online',
+        value='dawno temu' if last_seen is None else last_seen.strftime(DATE_FORMAT)
+    )
+
+
+async def server_query(embed):
+    global first_seen, last_seen
+
+    log("Querying server...")
+    query = server.query(tries=1)
+
+    if first_seen is None:
+        first_seen = datetime.now()
+    last_seen = datetime.now()
+
+    await bot.change_presence(activity=Game(
+        name=f"Minecraft ({query.players.online}/{query.players.max} graczy)"
+    ))
+
+    players = '\n'.join(query.players.names)
+    embed.add_field(
+        name='Gracze online',
+        value=players if players else 'Brak graczy na serwerze',
+        inline=False
+    )
+
+    embed.add_field(
+        name='Adres serwera',
+        value=
+        '`szkolny.eu`\n'
+        '`librus.fun`\n',
+        inline=True
+    )
+
+    uptime = last_seen - first_seen
+    uptime = str(uptime).split('.')[0]
+
+    embed.add_field(
+        name='Status serwera',
+        value=
+        f'**Wersja**: {SERVER_VERSION}\n'
+        f'**Aktualnie graczy**: {query.players.online}\n'
+        f'**Max graczy**: {query.players.max}\n'
+        f'**Uptime**: {uptime}',
+        inline=True
+    )
+
+    embed.add_field(
+        name='Własne skiny',
+        value=
+        'Aby wgrać własny skin (np. dla kont non-premium) \n'
+        f'wejdź na {SKINS_URL} i zaloguj się\n'
+        'danymi które podajesz w /login na serwerze.',
+        inline=False
+    )
+
+
+async def server_disconnected(embed, exception):
+    global first_seen, last_seen
+
+    log(f"!!! Server disconnected, last seen at {last_seen.strftime(DATE_FORMAT) if last_seen is not None else 'never'}")
+    await bot.change_presence(activity=Game(
+        name=f"Minecraft - serwer offline"
+    ))
+
+    first_seen = None
+
+    embed.colour = Colour.from_rgb(0xf0, 0x47, 0x47)
+
+    embed.add_field(
+        name='Serwer jest offline',
+        value=
+        'Serwer może być wyłączony, mieć przerwę techniczną,\n'
+        'lub nie działać z jakiegoś innego powodu.\n'
+        'Nie martw się, nawet najlepszym e-dziennikom\n'
+        'się to zdarza.',
+        inline=False
+    )
+
+    embed.add_field(
+        name='Ostatnio online',
+        value='dawno temu' if last_seen is None else last_seen.strftime(DATE_FORMAT)
+    )
+
+    embed.add_field(
+        name='Błąd',
+        value=str(exception)
+    )
 
 
 async def update_status(get_embed=False):
@@ -129,83 +261,10 @@ async def update_status(get_embed=False):
 
     embed.set_footer(text=f'Aktualizacja: {datetime.now().strftime(DATE_FORMAT)}')
 
-    log("Querying server...")
     try:
-        query = server.query()
-
-        if first_seen is None:
-            first_seen = datetime.now()
-        last_seen = datetime.now()
-
-        await bot.change_presence(activity=Game(
-            name=f"Minecraft ({query.players.online}/{query.players.max} graczy)"
-        ))
-
-        players = '\n'.join(query.players.names)
-        embed.add_field(
-            name='Gracze online',
-            value=players if players else 'Brak graczy na serwerze',
-            inline=False
-        )
-
-        embed.add_field(
-            name='Adres serwera',
-            value=
-            '`szkolny.eu`\n'
-            '`librus.fun`\n',
-            inline=True
-        )
-
-        uptime = last_seen - first_seen
-        uptime = str(uptime).split('.')[0]
-
-        embed.add_field(
-            name='Status serwera',
-            value=
-            f'**Wersja**: {SERVER_VERSION}\n'
-            f'**Aktualnie graczy**: {query.players.online}\n'
-            f'**Max graczy**: {query.players.max}\n'
-            f'**Uptime**: {uptime}',
-            inline=True
-        )
-
-        embed.add_field(
-            name='Własne skiny',
-            value=
-            'Aby wgrać własny skin (np. dla kont non-premium) \n'
-            f'wejdź na {SKINS_URL} i zaloguj się\n'
-            'danymi które podajesz w /login na serwerze.',
-            inline=False
-        )
+        await server_status(embed)
     except Exception as e:
-        log(f"!!! Server offline, last seen at {last_seen.strftime(DATE_FORMAT)}")
-        await bot.change_presence(activity=Game(
-            name=f"Minecraft - serwer offline"
-        ))
-
-        first_seen = None
-
-        embed.colour = Colour.from_rgb(0xf0, 0x47, 0x47)
-
-        embed.add_field(
-            name='Serwer jest offline',
-            value=
-            'Serwer może być wyłączony, mieć przerwę techniczną,\n'
-            'lub nie działać z jakiegoś innego powodu.\n'
-            'Nie martw się, nawet najlepszym e-dziennikom\n'
-            'się to zdarza.',
-            inline=False
-        )
-
-        embed.add_field(
-            name='Ostatnio online',
-            value='dawno temu' if last_seen is None else last_seen.strftime(DATE_FORMAT)
-        )
-
-        embed.add_field(
-            name='Błąd',
-            value=str(e)
-        )
+        await server_disconnected(embed, e)
 
     if SEC1_IP:
         if sec1_online:
@@ -214,7 +273,9 @@ async def update_status(get_embed=False):
 
             embed.add_field(
                 name=SEC1_NAME,
-                value=f':white_check_mark: {sec1_motd}\n`{sec1_players}/{sec1_max} graczy, {sec1_version}, {uptime}`\n{SEC1_DESCRIPTION}',
+                value=f':white_check_mark: {sec1_motd}\n'
+                      f'`{sec1_players}/{sec1_max} graczy, {sec1_version}, {uptime}`\n'
+                      f'{SEC1_DESCRIPTION}',
                 inline=False
             )
         else:
@@ -231,7 +292,9 @@ async def update_status(get_embed=False):
 
             embed.add_field(
                 name=SEC2_NAME,
-                value=f':white_check_mark: {sec2_motd}\n`{sec2_players}/{sec2_max} graczy, {sec2_version}, {uptime}`\n{SEC2_DESCRIPTION}',
+                value=f':white_check_mark: {sec2_motd}\n'
+                      f'`{sec2_players}/{sec2_max} graczy, {sec2_version}, {uptime}`\n'
+                      f'{SEC2_DESCRIPTION}',
                 inline=False
             )
         else:
